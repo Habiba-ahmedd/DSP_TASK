@@ -830,7 +830,7 @@ def show_quantization():
     clear_page()
     make_header(
         "Quantization - Task 3",
-        "Choose a signal file and quantize it using bits or levels"
+        "Quantize a signal generated in Task 2 or loaded from a test-case file"
     )
 
     content = ctk.CTkFrame(container, fg_color="transparent")
@@ -840,12 +840,32 @@ def show_quantization():
     controls = ctk.CTkFrame(content, corner_radius=10)
     controls.pack(fill="x", pady=(0, 10))
 
-    selected_file_var = ctk.StringVar(value="No input file selected")
-    ctk.CTkLabel(controls, text="Input signal", font=("Arial", 12, "bold")).grid(
-        row=0, column=0, padx=12, pady=(12, 4), sticky="w"
+    source_var = ctk.StringVar(value="Generated Signal (Task 2)")
+    ctk.CTkLabel(controls, text="Signal source", font=("Arial", 12, "bold")).grid(
+        row=0, column=0, padx=12, pady=(12, 3), sticky="w"
     )
-    ctk.CTkLabel(controls, textvariable=selected_file_var, text_color="gray", wraplength=500).grid(
-        row=1, column=0, padx=12, pady=(0, 10), sticky="w"
+    source_menu = ctk.CTkOptionMenu(
+        controls, variable=source_var,
+        values=["Generated Signal (Task 2)", "Input File (Test Case)"], width=230
+    )
+    source_menu.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="w")
+
+    generated_var = ctk.StringVar(value="No generated signals yet")
+    ctk.CTkLabel(controls, text="Generated signal").grid(
+        row=0, column=1, padx=12, pady=(12, 3), sticky="w"
+    )
+    generated_menu = ctk.CTkOptionMenu(
+        controls, variable=generated_var,
+        values=["No generated signals yet"], width=280
+    )
+    generated_menu.grid(row=1, column=1, padx=12, pady=(0, 10), sticky="w")
+
+    selected_file_var = ctk.StringVar(value="No input file selected")
+    ctk.CTkLabel(controls, text="Input file (for test cases)").grid(
+        row=0, column=2, padx=12, pady=(12, 3), sticky="w"
+    )
+    ctk.CTkLabel(controls, textvariable=selected_file_var, text_color="gray", wraplength=300).grid(
+        row=1, column=2, padx=12, pady=(0, 10), sticky="w"
     )
     chosen = {"path": None}
 
@@ -859,8 +879,20 @@ def show_quantization():
             selected_file_var.set(filename)
 
     make_button(controls, "Browse…", choose_quantization_file, width=120).grid(
-        row=0, column=1, rowspan=2, padx=12, pady=10
+        row=0, column=3, rowspan=2, padx=12, pady=10
     )
+
+    def refresh_generated_menu():
+        labels = [item["label"] for item in generated_signals]
+        if labels:
+            generated_menu.configure(values=labels)
+            if generated_var.get() not in labels:
+                generated_var.set(labels[-1])
+        else:
+            generated_menu.configure(values=["No generated signals yet"])
+            generated_var.set("No generated signals yet")
+
+    refresh_generated_menu()
 
     mode_var = ctk.StringVar(value="Bits")
     ctk.CTkLabel(controls, text="Input type").grid(row=2, column=0, padx=12, pady=(0, 3), sticky="w")
@@ -875,6 +907,17 @@ def show_quantization():
     )
     amount_entry.grid(row=3, column=1, padx=12, pady=(0, 10), sticky="w")
 
+    # The selected representation is used both for the original preview and
+    # for the original/quantized comparison after quantization.
+    representation_var = ctk.StringVar(value="Discrete")
+    ctk.CTkLabel(controls, text="Signal representation").grid(
+        row=2, column=2, padx=12, pady=(0, 3), sticky="w"
+    )
+    ctk.CTkOptionMenu(
+        controls, variable=representation_var,
+        values=["Discrete", "Continuous"], width=170
+    ).grid(row=3, column=2, padx=12, pady=(0, 10), sticky="w")
+
     output_frame = ctk.CTkFrame(content, corner_radius=10)
     output_frame.pack(fill="both", expand=True)
     output_text = ctk.CTkTextbox(output_frame, height=180, font=("Consolas", 11))
@@ -883,12 +926,61 @@ def show_quantization():
     plot_frame = ctk.CTkFrame(content, corner_radius=10, height=260)
     plot_frame.pack(fill="both", expand=True, pady=(10, 0))
 
-    def run_quantization():
-        if not chosen["path"]:
-            messagebox.showwarning("Missing input", "Please browse and select a signal input file first.")
-            return
-        try:
+    def get_selected_signal():
+        """Return the selected signal's indices, samples, and display name."""
+        refresh_generated_menu()
+        if source_var.get() == "Generated Signal (Task 2)":
+            selected_label = generated_var.get()
+            selected_item = next(
+                (item for item in generated_signals if item["label"] == selected_label), None
+            )
+            if selected_item is None:
+                raise ValueError("Go to Task 2, generate a sine or cosine signal, then return here.")
+            indices = np.asarray(selected_item["indices"], dtype=int).tolist()
+            samples = np.asarray(selected_item["samples"], dtype=float).tolist()
+            signal_description = selected_item["label"]
+        else:
+            if not chosen["path"]:
+                raise ValueError("Please browse and select a signal input file first.")
             indices, samples = read_signal(chosen["path"])
+            signal_description = chosen["path"].split("/")[-1].split("\\")[-1]
+        return indices, samples, signal_description
+
+    def preview_original_signal():
+        """Show only the selected original signal before quantization."""
+        try:
+            indices, samples, signal_description = get_selected_signal()
+            output_text.configure(state="normal")
+            output_text.delete("1.0", "end")
+            output_text.insert("1.0", f"Original signal preview: {signal_description}\n"
+                                       f"Number of samples: {len(samples)}\n"
+                                       "Press 'Quantize Signal' to display the quantization results.")
+
+            fig, ax = plt.subplots(figsize=(7, 4.5))
+            if representation_var.get() == "Discrete":
+                markerline, stemlines, baseline = ax.stem(
+                    indices, samples, linefmt="C0-", markerfmt="C0o", basefmt=" "
+                )
+                plt.setp(markerline, markersize=4)
+                plt.setp(stemlines, linewidth=1.5)
+            else:
+                ax.plot(indices, samples, color="C0", marker="o", markersize=3, linewidth=1.8)
+            ax.set_title(
+                f"Original Signal - {signal_description} ({representation_var.get()})"
+            )
+            ax.set_xlabel("Sample Index (n)")
+            ax.set_ylabel("Amplitude")
+            apply_modern_plot_style(fig, ax)
+            fig.tight_layout()
+            embed_figure_in_frame(fig, plot_frame)
+        except (ValueError, OSError) as error:
+            messagebox.showwarning("Cannot Preview Signal", str(error))
+        except Exception as error:
+            messagebox.showerror("Preview Error", f"Could not preview signal:\n{error}")
+
+    def run_quantization():
+        try:
+            indices, samples, signal_description = get_selected_signal()
             amount = int(amount_entry.get())
             if amount <= 0:
                 raise ValueError("Enter a positive integer.")
@@ -898,31 +990,47 @@ def show_quantization():
                 levels = 2 ** amount
             else:
                 levels = amount
+
             interval_ids, encoded, quantized, errors = quantize_signal(samples, levels)
             bits = int(np.ceil(np.log2(levels)))
-
-            lines = [f"Levels: {levels}    Bits used for encoding: {bits}", ""]
+            lines = [f"Signal: {signal_description}", f"Levels: {levels}    Bits used for encoding: {bits}", ""]
             if mode_var.get() == "Levels":
-                lines.append("Index | Code | Quantized | Error (xq - x)")
-                lines.append("-" * 43)
-                for idx, code, q, err in zip(interval_ids, encoded, quantized, errors):
-                    lines.append(f"{idx:5d} | {code:4s} | {q:9.4f} | {err: .4f}")
+                lines.extend(["Sample | Interval | Code | Quantized | Error (xq - x)", "-" * 61])
+                for sample_index, interval_id, code, q, err in zip(indices, interval_ids, encoded, quantized, errors):
+                    lines.append(f"{sample_index:6d} | {interval_id:8d} | {code:4s} | {q:9.4f} | {err: .4f}")
             else:
-                lines.append("Code | Quantized")
-                lines.append("-" * 23)
-                for code, q in zip(encoded, quantized):
-                    lines.append(f"{code:4s} | {q:9.4f}")
+                lines.extend(["Sample | Code | Quantized | Error (xq - x)", "-" * 46])
+                for sample_index, code, q, err in zip(indices, encoded, quantized, errors):
+                    lines.append(f"{sample_index:6d} | {code:4s} | {q:9.4f} | {err: .4f}")
+
             output_text.configure(state="normal")
             output_text.delete("1.0", "end")
             output_text.insert("1.0", "\n".join(lines))
 
             fig, axes = plt.subplots(2, 1, figsize=(7, 4.5), sharex=True)
-            axes[0].stem(indices, samples, linefmt="C0-", markerfmt="C0o", basefmt=" ", label="Original")
-            axes[0].step(indices, quantized, where="mid", color="C1", linewidth=1.8, label="Quantized")
-            axes[0].set_title("Original and Quantized Signal")
+            if representation_var.get() == "Discrete":
+                axes[0].stem(
+                    indices, samples, linefmt="C0-", markerfmt="C0o",
+                    basefmt=" ", label="Original"
+                )
+                axes[0].step(
+                    indices, quantized, where="mid", color="C1",
+                    linewidth=1.8, label="Quantized"
+                )
+                axes[1].stem(indices, errors, linefmt="C2-", markerfmt="C2o", basefmt=" ")
+            else:
+                axes[0].plot(
+                    indices, samples, color="C0", marker="o", markersize=3,
+                    linewidth=1.8, label="Original"
+                )
+                axes[0].step(
+                    indices, quantized, where="mid", color="C1",
+                    linewidth=1.8, label="Quantized"
+                )
+                axes[1].plot(indices, errors, color="C2", marker="o", markersize=3, linewidth=1.5)
+            axes[0].set_title(f"Original and Quantized Signal ({representation_var.get()})")
             axes[0].set_ylabel("Amplitude")
             axes[0].legend()
-            axes[1].stem(indices, errors, linefmt="C2-", markerfmt="C2o", basefmt=" ")
             axes[1].axhline(0, color="gray", linewidth=1)
             axes[1].set_title("Quantization Error (quantized - original)")
             axes[1].set_xlabel("Sample Index (n)")
@@ -936,8 +1044,13 @@ def show_quantization():
         except Exception as error:
             messagebox.showerror("Error", f"Could not quantize signal:\n{error}")
 
-    make_button(controls, "Quantize Signal", run_quantization).grid(
-        row=3, column=2, padx=12, pady=(0, 10), sticky="e"
+    # Put the action buttons on a separate row so they do not overlap the
+    # Signal representation dropdown or the Browse button.
+    make_button(controls, "Preview Original Signal", preview_original_signal, primary=False, width=175).grid(
+        row=4, column=2, padx=12, pady=(0, 12), sticky="w"
+    )
+    make_button(controls, "Quantize Signal", run_quantization, width=150).grid(
+        row=4, column=3, padx=12, pady=(0, 12), sticky="w"
     )
 
 
