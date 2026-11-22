@@ -248,6 +248,16 @@ def show_home():
         anchor="w", padx=15, pady=(0, 15), fill="x"
     )
 
+    # Task 4 is an independent page; previous cards and features remain unchanged.
+    task4_card = make_card(
+        cards, "Task 4 - Signal Filtering",
+        "Moving average, first/second derivative, convolution and output plots."
+    )
+    task4_card.grid(row=1, column=1, padx=5, pady=12, sticky="nsew")
+    make_button(task4_card, "Open Task 4 →", show_task4).pack(
+        anchor="w", padx=15, pady=(0, 15), fill="x"
+    )
+
     for column in range(3):
         cards.grid_columnconfigure(column, weight=1, uniform="cards")
 
@@ -1068,6 +1078,191 @@ def show_quantization():
     btn_frame.pack(fill="x", padx=15, pady=(5, 15))
     make_button(btn_frame, "Preview Original", preview_original_signal, primary=False, width=110).pack(side="left", padx=(0, 5))
     make_button(btn_frame, "Quantize", run_quantization, width=110).pack(side="right", padx=(5, 0))
+
+
+
+# =========================================================
+# TASK 4: MOVING AVERAGE, DERIVATIVES AND CONVOLUTION
+# Added independently; all older code is unchanged.
+# =========================================================
+
+def task4_validate_signal(indices, samples):
+    if not samples or len(indices) != len(samples):
+        raise ValueError("The signal must contain matching indices and samples.")
+    if any(indices[i + 1] - indices[i] != 1 for i in range(len(indices) - 1)):
+        raise ValueError("Task 4 needs consecutive integer sample indices.")
+
+
+def task4_moving_average(indices, samples, window_size):
+    task4_validate_signal(indices, samples)
+    if not 1 <= window_size <= len(samples):
+        raise ValueError("Window size must be between 1 and the signal length.")
+    output = []
+    for i in range(len(samples) - window_size + 1):
+        window = samples[i:i + window_size]
+        output.append(sum(window) / window_size)
+    return list(indices[:len(output)]), output
+
+
+def task4_first_derivative(indices, samples):
+    task4_validate_signal(indices, samples)
+    if len(samples) < 2:
+        raise ValueError("First derivative requires at least two samples.")
+    # Formula: y[n] = x[n] - x[n-1]; output positions are indexed from 0 for the reference tests.
+    return list(range(len(samples) - 1)), [samples[i] - samples[i - 1] for i in range(1, len(samples))]
+
+
+def task4_second_derivative(indices, samples):
+    task4_validate_signal(indices, samples)
+    if len(samples) < 3:
+        raise ValueError("Second derivative requires at least three samples.")
+    # Formula: y[n] = x[n+1] - 2*x[n] + x[n-1]; output positions start from 0.
+    return list(range(len(samples) - 2)), [
+        samples[i + 1] - 2 * samples[i] + samples[i - 1]
+        for i in range(1, len(samples) - 1)
+    ]
+
+
+def task4_convolution(first_indices, first_samples, second_indices, second_samples):
+    task4_validate_signal(first_indices, first_samples)
+    task4_validate_signal(second_indices, second_samples)
+    result = [0.0] * (len(first_samples) + len(second_samples) - 1)
+    for i in range(len(first_samples)):
+        for j in range(len(second_samples)):
+            result[i + j] += first_samples[i] * second_samples[j]
+    start = first_indices[0] + second_indices[0]
+    return list(range(start, start + len(result))), result
+
+
+def show_task4():
+    clear_page()
+    make_header("Task 4 - Signal Filtering", "Moving Average | Sharpening | Convolution")
+    content = ctk.CTkFrame(container, fg_color="transparent")
+    content.pack(fill="both", expand=True, padx=15, pady=10)
+    make_button(content, "← Back to Home", show_home, primary=False, width=130).pack(anchor="w", pady=(0, 8))
+
+    main = ctk.CTkFrame(content, fg_color="transparent")
+    main.pack(fill="both", expand=True)
+    left = ctk.CTkScrollableFrame(main, width=325)
+    left.pack(side="left", fill="y", padx=(0, 10))
+    right = ctk.CTkFrame(main, fg_color="transparent")
+    right.pack(side="left", fill="both", expand=True)
+
+    local_signals = []
+    output_state = {"indices": None, "samples": None}
+    operation_var = ctk.StringVar(value="Moving Average")
+    first_var = ctk.StringVar(value="No signals available")
+    second_var = ctk.StringVar(value="No signals available")
+    window_var = ctk.StringVar(value="3")
+
+    def available_signals():
+        available = []
+        for i, (idx, vals) in enumerate(signals):
+            available.append((f"Loaded Signal {i + 1}", list(idx), list(vals)))
+        for item in generated_signals:
+            available.append((item["label"], list(item["indices"]), list(item["samples"])))
+        available.extend(local_signals)
+        return available
+
+    ctk.CTkLabel(left, text="Task 4 Settings", font=("Arial", 15, "bold")).pack(anchor="w", pady=(8, 10))
+    ctk.CTkLabel(left, text="Operation").pack(anchor="w", pady=(4, 2))
+    ctk.CTkOptionMenu(left, variable=operation_var, values=[
+        "Moving Average", "First Derivative", "Second Derivative", "Convolution"
+    ]).pack(fill="x", pady=(0, 8))
+
+    ctk.CTkLabel(left, text="First / Input Signal").pack(anchor="w")
+    first_menu = ctk.CTkOptionMenu(left, variable=first_var, values=["No signals available"])
+    first_menu.pack(fill="x", pady=(2, 8))
+    ctk.CTkLabel(left, text="Second Signal (Convolution only)").pack(anchor="w")
+    second_menu = ctk.CTkOptionMenu(left, variable=second_var, values=["No signals available"])
+    second_menu.pack(fill="x", pady=(2, 8))
+    ctk.CTkLabel(left, text="Window Size (Moving Average only)").pack(anchor="w")
+    ctk.CTkEntry(left, textvariable=window_var).pack(fill="x", pady=(2, 8))
+
+    def refresh_menus():
+        choices = [name for name, _, _ in available_signals()]
+        if not choices:
+            choices = ["No signals available"]
+        first_menu.configure(values=choices)
+        second_menu.configure(values=choices)
+        if first_var.get() not in choices:
+            first_var.set(choices[0])
+        if second_var.get() not in choices:
+            second_var.set(choices[1] if len(choices) > 1 else choices[0])
+
+    def load_for_task4():
+        filenames = filedialog.askopenfilenames(title="Load Task 4 Signals", filetypes=[("Text files", "*.txt")])
+        for name in filenames:
+            try:
+                idx, vals = read_signal(name)
+                local_signals.append((f"Task 4 File {len(local_signals) + 1}: {__import__('os').path.basename(name)}", idx, vals))
+            except Exception as error:
+                messagebox.showerror("Input File Error", f"{name}\n{error}")
+        refresh_menus()
+
+    make_button(left, "Load Signal File(s)", load_for_task4, primary=False).pack(fill="x", pady=(0, 8))
+    refresh_menus()
+
+    first_plot = ctk.CTkFrame(right, corner_radius=10)
+    first_plot.pack(side="left", fill="both", expand=True, padx=(0, 5))
+    output_plot = ctk.CTkFrame(right, corner_radius=10)
+    output_plot.pack(side="left", fill="both", expand=True, padx=(5, 0))
+
+    ctk.CTkLabel(left, text="Output Signal", font=("Arial", 12, "bold")).pack(anchor="w", pady=(8, 3))
+    report = ctk.CTkTextbox(left, height=150, font=("Consolas", 11))
+    report.pack(fill="x", pady=(0, 8))
+
+    def write_report(message):
+        report.configure(state="normal")
+        report.delete("1.0", "end")
+        report.insert("1.0", message)
+
+    def selected(name):
+        return next((s for s in available_signals() if s[0] == name), None)
+
+    def calculate():
+        item = selected(first_var.get())
+        if item is None:
+            messagebox.showwarning("No signal", "Load or generate a signal first.")
+            return
+        name, indices, samples = item
+        op = operation_var.get()
+        window_size = None
+        other = None
+        try:
+            if op == "Moving Average":
+                window_size = int(window_var.get())
+                out_idx, out_vals = task4_moving_average(indices, samples, window_size)
+            elif op == "First Derivative":
+                out_idx, out_vals = task4_first_derivative(indices, samples)
+            elif op == "Second Derivative":
+                out_idx, out_vals = task4_second_derivative(indices, samples)
+            else:
+                other = selected(second_var.get())
+                if other is None:
+                    raise ValueError("Load a second signal for convolution.")
+                out_idx, out_vals = task4_convolution(indices, samples, other[1], other[2])
+            output_state["indices"] = out_idx
+            output_state["samples"] = out_vals
+            plot_file_signal(indices, samples, f"Input: {name}", first_plot)
+            plot_file_signal(out_idx, out_vals, f"{op} Output", output_plot)
+            write_report("Operation: " + op + "\nIndices: " + str(out_idx)
+                         + "\nSamples: " + str([round(v, 8) for v in out_vals]))
+            # Print the static-reference test result in the console, not the GUI.
+            try:
+                from test_task4 import check_task4_output
+                check_task4_output(
+                    op, indices, samples, out_idx, out_vals,
+                    window_size=window_size,
+                    second_indices=other[1] if other is not None else None,
+                    second_samples=other[2] if other is not None else None,
+                )
+            except Exception as test_error:
+                print(f"[Task 4 Test] TEST ERROR: {test_error}", flush=True)
+        except Exception as error:
+            messagebox.showerror("Task 4 Error", str(error))
+
+    make_button(left, "Compute & Display Output", calculate).pack(fill="x", pady=(0, 12))
 
 
 # Start on the home page
